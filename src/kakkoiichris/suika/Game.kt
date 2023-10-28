@@ -8,6 +8,7 @@ import kakkoiichris.hypergame.media.Renderer
 import kakkoiichris.hypergame.state.StateManager
 import kakkoiichris.hypergame.util.Time
 import kakkoiichris.hypergame.util.math.Box
+import kakkoiichris.hypergame.util.math.QuadTree
 import kakkoiichris.hypergame.util.math.Vector
 import kakkoiichris.hypergame.util.math.clamp
 import kakkoiichris.hypergame.view.Sketch
@@ -15,6 +16,8 @@ import kakkoiichris.hypergame.view.View
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.RenderingHints.*
+
+typealias Collision = Pair<Fruit, Fruit>
 
 fun main() {
     val game = Game()
@@ -27,9 +30,9 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 
     private val fruits = mutableListOf<Fruit>()
 
-    private var heldFruit = Fruit(0.0, 0.0, Fruit.Type.Sakuranbo)
+    private lateinit var heldFruit: Fruit
 
-    private lateinit var dropPos: Vector
+    private val collisions = mutableListOf<Collision>()
 
     override fun swapTo(view: View) {
         with(view.renderer) {
@@ -45,53 +48,73 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 
         jar = Box(view.width / 3.0, view.height / 4.0, view.width / 3.0, 2.75 * (view.height / 4.0))
 
-        dropPos = Vector(jar.centerX, view.height / 8.0)
+        heldFruit = Fruit(Vector(jar.centerX, view.height / 8.0), Fruit.Type.Sakuranbo, jar)
     }
 
     override fun update(view: View, manager: StateManager, time: Time, input: Input) {
         if (input.buttonDown(Button.LEFT)) {
             fruits += heldFruit
 
-            heldFruit = Fruit(0.0, 0.0, Fruit.Type.Sakuranbo)
+            heldFruit = Fruit(heldFruit.bounds.center, Fruit.Type.Sakuranbo, jar)
         }
+
+        heldFruit.position.x = input.mouse.x.clamp(jar.left + heldFruit.type.radius, jar.right - heldFruit.type.radius)
+
+        val tree = QuadTree<Fruit>(jar)
 
         fruits.forEach {
             it.update(view, manager, time, input)
 
-            if (it.bottom > jar.bottom) {
-                it.bottom = jar.bottom
-            }
-
-            if (it.left < jar.left) {
-                it.left = jar.left
-            }
-
-            if (it.right > jar.right) {
-                it.right = jar.right
-            }
+            tree.insert(it)
         }
 
-        for (ia in fruits.indices) {
-            for (ib in fruits.indices.drop(ia + 1)) {
-                val a = fruits[ia].takeIf { !it.removed } ?: continue
-                val b = fruits[ib].takeIf { !it.removed } ?: continue
+        collisions.clear()
 
-                if (a.intersects(b) && a.type === b.type) {
-                    a.removed = true
-                    b.removed = true
+        for (a in fruits) {
+            val near = tree.queryPosition(a.bounds.copy().apply { resize(a.type.radius * 2) })
 
-                    val center = (a.position + b.position) / 2.0
+            for (b in near) {
+                if (a === b) continue
 
-                    fruits.add(Fruit(center.x, center.y, a.type.next()))
+                if (a.isColliding(b)) {
+                    collisions += a to b
+
+                    val distance = a.distanceTo(b)
+                    val overlap = (distance - a.type.radius - b.type.radius) * .5
+                    val diff = (a.position - b.position) * overlap / distance
+
+                    a.position -= diff
+                    b.position += diff
                 }
             }
         }
 
+        collisions.forEach { (a, b) ->
+            val normal = a.position.normalTo(b.position)
+            val tangent = normal.tangent
+
+            val dna = a.velocity dot normal
+            val dnb = b.velocity dot normal
+            val dta = a.velocity dot tangent
+            val dtb = b.velocity dot tangent
+
+            val ma = (dna * (a.type.mass - b.type.mass) + 2 * b.type.mass * dnb) / (a.type.mass + b.type.mass)
+            val mb = (dnb * (b.type.mass - a.type.mass) + 2 * a.type.mass * dna) / (a.type.mass + b.type.mass)
+
+            a.velocity = (tangent * dta + normal * ma) * 0.9
+            b.velocity = (tangent * dtb + normal * mb) * 0.9
+
+            if (a.type === b.type && !(a.removed || b.removed)) {
+                val center = (a.bounds.center + b.bounds.center) / 2.0
+
+                fruits.add(Fruit(center, a.type.next(), jar))
+
+                a.removed = true
+                b.removed = true
+            }
+        }
+
         fruits.removeIf(Fruit::removed)
-
-        dropPos.x = input.mouse.x.clamp(jar.left + heldFruit.type.radius, jar.right - heldFruit.type.radius)
-
-        heldFruit.center = dropPos
     }
 
     override fun render(view: View, renderer: Renderer) {
@@ -99,7 +122,7 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
         renderer.fillRect(view.bounds)
 
         renderer.color = Colors.white
-        renderer.drawLine(dropPos, dropPos.copy(y = jar.bottom))
+        renderer.drawLine(heldFruit.position, heldFruit.position.copy(y = jar.bottom))
 
         heldFruit.render(view, renderer)
 
@@ -110,28 +133,62 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
     }
 }
 
-class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, type.diameter), Renderable {
-    private var velocity = Vector()
+class Fruit(
+    override var position: Vector,
+    val type: Type,
+    val jar: Box
+) : Renderable, QuadTree.Element {
+    override val bounds
+        get() = Box(position.x - type.radius, position.y - type.radius, type.radius * 2, type.radius * 2)
+
+    var velocity = Vector()
+
+    private var acceleration = Vector()
+
+    var collided = false
 
     var removed = false
 
+    fun distanceTo(other: Fruit) =
+        position.distanceTo(other.position)
+
+    fun isColliding(other: Fruit) =
+        (position.x - other.position.x) * (position.x - other.position.x) + (position.y - other.position.y) * (position.y - other.position.y) <= (type.radius + other.type.radius) * (type.radius + other.type.radius)
+
     override fun update(view: View, manager: StateManager, time: Time, input: Input) {
         position += velocity
-        velocity += gravity * time.delta
+        velocity += acceleration * time.delta
+
+        if (position.x < jar.left+type.radius) {
+            position.x = jar.left+type.radius
+            velocity.x *= -0.9
+        }
+
+        if (position.x > jar.right-type.radius) {
+            position.x = jar.right-type.radius
+            velocity.x *= -0.9
+        }
+
+        if (position.y > jar.bottom-type.radius) {
+            position.y = jar.bottom-type.radius
+            velocity.y *= -0.1
+        }
+
+        if (velocity.magnitude < .01) velocity.zero()
+
+        acceleration = -velocity * .01 + gravity
     }
 
     override fun render(view: View, renderer: Renderer) {
         renderer.color = type.color
-        renderer.fillOval(this)
+        renderer.fillOval(bounds)
 
         renderer.color = type.color.darker()
-        renderer.drawOval(this)
+        renderer.drawOval(bounds)
     }
 
     companion object {
         val gravity = Vector(0.0, 0.4)
-        fun random() =
-            Fruit(0.0, 0.0, Type.random())
     }
 
     enum class Type(rgb: Int) {
@@ -152,6 +209,8 @@ class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, typ
         val radius get() = (ordinal * 9.0) + 12
 
         val diameter get() = radius * 2
+
+        val mass = 10.0
 
         fun next() =
             if (this === Suika)
