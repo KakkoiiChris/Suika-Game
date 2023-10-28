@@ -52,7 +52,7 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
         if (input.buttonDown(Button.LEFT)) {
             fruits += heldFruit
 
-            heldFruit = Fruit.random()
+            heldFruit = Fruit(0.0, 0.0, Fruit.Type.Sakuranbo)
         }
 
         fruits.forEach {
@@ -70,6 +70,24 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
                 it.right = jar.right
             }
         }
+
+        for (ia in fruits.indices) {
+            for (ib in fruits.indices.drop(ia + 1)) {
+                val a = fruits[ia].takeIf { !it.removed } ?: continue
+                val b = fruits[ib].takeIf { !it.removed } ?: continue
+
+                if (a.intersects(b) && a.type === b.type) {
+                    a.removed = true
+                    b.removed = true
+
+                    val center = (a.position + b.position) / 2.0
+
+                    fruits.add(Fruit(center.x, center.y, a.type.next()))
+                }
+            }
+        }
+
+        fruits.removeIf(Fruit::removed)
 
         dropPos.x = input.mouse.x.clamp(jar.left + heldFruit.type.radius, jar.right - heldFruit.type.radius)
 
@@ -94,6 +112,8 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 
 class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, type.diameter), Renderable {
     private var velocity = Vector()
+
+    var removed = false
 
     override fun update(view: View, manager: StateManager, time: Time, input: Input) {
         position += velocity
@@ -132,6 +152,12 @@ class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, typ
         val radius get() = (ordinal * 9.0) + 12
 
         val diameter get() = radius * 2
+
+        fun next() =
+            if (this === Suika)
+                Suika
+            else
+                entries[ordinal + 1]
 
         companion object {
             fun random() = entries.random()
