@@ -137,7 +137,7 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 class Fruit(
     override var position: Vector,
     val type: Type,
-    val jar: Box
+    private val jar: Box
 ) : Renderable, QuadTree.Element {
     override val bounds
         get() = Box(position.x - type.radius, position.y - type.radius, type.radius * 2, type.radius * 2)
@@ -146,9 +146,9 @@ class Fruit(
 
     private var acceleration = Vector()
 
-    var collided = false
-
     var removed = false
+
+    var entered = false
 
     fun distanceTo(other: Fruit) =
         position.distanceTo(other.position)
@@ -160,19 +160,29 @@ class Fruit(
         position += velocity
         velocity += acceleration * time.delta
 
-        if (position.x < jar.left+type.radius) {
-            position.x = jar.left+type.radius
+        if (position.x < jar.left + type.radius) {
+            position.x = jar.left + type.radius
             velocity.x *= -0.25
         }
 
-        if (position.x > jar.right-type.radius) {
-            position.x = jar.right-type.radius
+        if (position.x > jar.right - type.radius) {
+            position.x = jar.right - type.radius
             velocity.x *= -0.25
         }
 
-        if (position.y > jar.bottom-type.radius) {
-            position.y = jar.bottom-type.radius
+        if (position.y > jar.bottom - type.radius) {
+            position.y = jar.bottom - type.radius
             velocity.y *= 0
+        }
+
+        if (jar.intersects(bounds)) {
+            entered = true
+        }
+
+        if (entered && !jar.intersects(bounds)) {
+            println("GAME OVER")
+
+            view.close()
         }
 
         if (velocity.magnitude < .01) velocity.zero()
@@ -212,7 +222,7 @@ class Fruit(
 
         val radius get() = (ordinal * 9.0) + 12
 
-        val mass get() = ordinal * 10.0
+        val mass get() = (ordinal * 5.0) + 10
 
         fun next() =
             if (this === Suika)
