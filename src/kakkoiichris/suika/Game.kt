@@ -1,4 +1,6 @@
 package kakkoiichris.suika
+
+import kakkoiichris.hypergame.input.Button
 import kakkoiichris.hypergame.input.Input
 import kakkoiichris.hypergame.media.Colors
 import kakkoiichris.hypergame.media.Renderable
@@ -6,11 +8,13 @@ import kakkoiichris.hypergame.media.Renderer
 import kakkoiichris.hypergame.state.StateManager
 import kakkoiichris.hypergame.util.Time
 import kakkoiichris.hypergame.util.math.Box
+import kakkoiichris.hypergame.util.math.Vector
+import kakkoiichris.hypergame.util.math.clamp
 import kakkoiichris.hypergame.view.Sketch
 import kakkoiichris.hypergame.view.View
 import java.awt.BasicStroke
 import java.awt.Color
-import java.awt.RenderingHints
+import java.awt.RenderingHints.*
 
 fun main() {
     val game = Game()
@@ -23,33 +27,63 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 
     private val fruits = mutableListOf<Fruit>()
 
-    override fun swapTo(view: View) {
-        view.renderer.setRenderingHints(
-            mapOf(
-                RenderingHints.KEY_ANTIALIASING to RenderingHints.VALUE_ANTIALIAS_ON,
-                RenderingHints.KEY_TEXT_ANTIALIASING to RenderingHints.VALUE_TEXT_ANTIALIAS_ON
-            )
-        )
+    private var heldFruit = Fruit(0.0, 0.0, Fruit.Type.Sakuranbo)
 
-        view.renderer.stroke = BasicStroke(8F)
+    private lateinit var dropPos: Vector
+
+    override fun swapTo(view: View) {
+        with(view.renderer) {
+            setRenderingHints(
+                mapOf(
+                    KEY_ANTIALIASING to VALUE_ANTIALIAS_ON,
+                    KEY_TEXT_ANTIALIASING to VALUE_TEXT_ANTIALIAS_ON
+                )
+            )
+
+            stroke = BasicStroke(8F)
+        }
 
         jar = Box(view.width / 3.0, view.height / 4.0, view.width / 3.0, 2.75 * (view.height / 4.0))
 
-        var n = 5.0
-
-        for (type in Fruit.Type.entries) {
-            fruits += Fruit(n, n, Fruit.Type.random())
-
-            n += 15
-        }
+        dropPos = Vector(jar.centerX, view.height / 8.0)
     }
 
     override fun update(view: View, manager: StateManager, time: Time, input: Input) {
+        if (input.buttonDown(Button.LEFT)) {
+            fruits += heldFruit
+
+            heldFruit = Fruit.random()
+        }
+
+        fruits.forEach {
+            it.update(view, manager, time, input)
+
+            if (it.bottom > jar.bottom) {
+                it.bottom = jar.bottom
+            }
+
+            if (it.left < jar.left) {
+                it.left = jar.left
+            }
+
+            if (it.right > jar.right) {
+                it.right = jar.right
+            }
+        }
+
+        dropPos.x = input.mouse.x.clamp(jar.left + heldFruit.type.radius, jar.right - heldFruit.type.radius)
+
+        heldFruit.center = dropPos
     }
 
     override fun render(view: View, renderer: Renderer) {
         renderer.color = Colors.CSS.goldenrod
         renderer.fillRect(view.bounds)
+
+        renderer.color = Colors.white
+        renderer.drawLine(dropPos, dropPos.copy(y = jar.bottom))
+
+        heldFruit.render(view, renderer)
 
         fruits.forEach { it.render(view, renderer) }
 
@@ -59,8 +93,11 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
 }
 
 class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, type.diameter), Renderable {
-    override fun update(view: View, manager: StateManager, time: Time, input: Input) {
+    private var velocity = Vector()
 
+    override fun update(view: View, manager: StateManager, time: Time, input: Input) {
+        position += velocity
+        velocity += gravity * time.delta
     }
 
     override fun render(view: View, renderer: Renderer) {
@@ -69,6 +106,12 @@ class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, typ
 
         renderer.color = type.color.darker()
         renderer.drawOval(this)
+    }
+
+    companion object {
+        val gravity = Vector(0.0, 0.4)
+        fun random() =
+            Fruit(0.0, 0.0, Type.random())
     }
 
     enum class Type(rgb: Int) {
@@ -90,7 +133,7 @@ class Fruit(x: Double, y: Double, val type: Type) : Box(x, y, type.diameter, typ
 
         val diameter get() = radius * 2
 
-        companion object{
+        companion object {
             fun random() = entries.random()
         }
     }
