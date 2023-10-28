@@ -16,6 +16,7 @@ import kakkoiichris.hypergame.view.View
 import java.awt.BasicStroke
 import java.awt.Color
 import java.awt.RenderingHints.*
+import kotlin.random.Random
 
 typealias Collision = Pair<Fruit, Fruit>
 
@@ -55,7 +56,7 @@ class Game : Sketch(1280, 720, "スイカゲーム") {
         if (input.buttonDown(Button.LEFT)) {
             fruits += heldFruit
 
-            heldFruit = Fruit(heldFruit.bounds.center, Fruit.Type.Sakuranbo, jar)
+            heldFruit = Fruit.random(heldFruit.bounds.center, jar)
         }
 
         heldFruit.position.x = input.mouse.x.clamp(jar.left + heldFruit.type.radius, jar.right - heldFruit.type.radius)
@@ -161,17 +162,17 @@ class Fruit(
 
         if (position.x < jar.left+type.radius) {
             position.x = jar.left+type.radius
-            velocity.x *= -0.9
+            velocity.x *= -0.25
         }
 
         if (position.x > jar.right-type.radius) {
             position.x = jar.right-type.radius
-            velocity.x *= -0.9
+            velocity.x *= -0.25
         }
 
         if (position.y > jar.bottom-type.radius) {
             position.y = jar.bottom-type.radius
-            velocity.y *= -0.1
+            velocity.y *= 0
         }
 
         if (velocity.magnitude < .01) velocity.zero()
@@ -189,6 +190,9 @@ class Fruit(
 
     companion object {
         val gravity = Vector(0.0, 0.4)
+
+        fun random(position: Vector, jar: Box) =
+            Fruit(position, Type.entries[Random.nextInt(5)], jar)
     }
 
     enum class Type(rgb: Int) {
@@ -208,18 +212,12 @@ class Fruit(
 
         val radius get() = (ordinal * 9.0) + 12
 
-        val diameter get() = radius * 2
-
-        val mass = 10.0
+        val mass get() = ordinal * 10.0
 
         fun next() =
             if (this === Suika)
                 Suika
             else
                 entries[ordinal + 1]
-
-        companion object {
-            fun random() = entries.random()
-        }
     }
 }
